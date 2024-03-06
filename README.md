@@ -13,11 +13,11 @@ Forecasting power consumption to estimate bidding prices in the Norwegian Nord P
 - Must be reproducable, and model should be pre-trained for demonstration.
 - A model must be trained on a bidding area, and tested on another along with a reflection of the results. 
 - At least three of four different forecasting models:
-    LSTM (Long Short-Term Memory) at least one layer
-    GRU (Gated Recurrent Unit) at least one layer
-    CNN (Convolutional Neural Network)
-    Transformer
-    Feed-forward regression model
+    - LSTM (Long Short-Term Memory) at least one layer
+    - GRU (Gated Recurrent Unit) at least one layer
+    - CNN (Convolutional Neural Network)
+    - Transformer
+    - Feed-forward regression model
 - Must add reqularizers (e.g. dropout, L1 or L2)
 
 ### Feature engineering
