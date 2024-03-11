@@ -1,3 +1,5 @@
+from sklearn.preprocessing import StandardScaler
+import joblib
 import matplotlib.pyplot as plt
 import pandas as pd
 import tensorflow as tf
@@ -63,16 +65,28 @@ class WindowGenerator():
 
         return inputs, labels
     
-    def plot(self, model=None, plot_col='NO1_consumption', max_subplots=3):
+    def plot(self, model=None, plot_col='NO1_consumption', max_subplots=3, denormalize=False):
+        scalar = joblib.load('./models/scaler.pkl')
         inputs, labels = self.example
+        model_inputs = inputs
+        inputs = inputs.numpy()
+        labels = labels.numpy()
+
         plt.figure(figsize=(12, 8))
         plot_col_index = self.column_indices[plot_col]
+
+        if denormalize:
+            mean = scalar['mean'][plot_col_index]
+            std = scalar['std'][plot_col_index]
+            for i in range(inputs.shape[0]):
+                inputs[i, :, plot_col_index] = inputs[i, :, plot_col_index] * std + mean
+                labels[i, :, plot_col_index] = labels[i, :, plot_col_index] * std + mean
+
         max_n = min(max_subplots, len(inputs))
         for n in range(max_n):
             plt.subplot(max_n, 1, n+1)
             plt.ylabel(f'{plot_col} [normed]')
-            plt.plot(self.input_indices, inputs[n, :, plot_col_index],
-                    label='Inputs', marker='.', zorder=-10)
+            plt.plot(self.input_indices, inputs[n, :, plot_col_index],label='Inputs', marker='.', zorder=-10)
 
             if self.label_columns:
                 label_col_index = self.label_columns_indices.get(plot_col, None)
@@ -85,7 +99,12 @@ class WindowGenerator():
             plt.scatter(self.label_indices, labels[n, :, label_col_index],
                         edgecolors='k', label='Labels', c='#2ca02c', s=64)
             if model is not None:
-                predictions = model(inputs)
+                predictions = model(model_inputs).numpy()
+
+                if denormalize:
+                    for i in range(predictions.shape[0]):
+                        predictions[i, :, plot_col_index] = predictions[i, :, plot_col_index] * std + mean
+
                 plt.scatter(self.label_indices, predictions[n, :, label_col_index],
                             marker='X', edgecolors='k', label='Predictions',
                             c='#ff7f0e', s=64)

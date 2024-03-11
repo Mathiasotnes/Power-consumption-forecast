@@ -1,8 +1,7 @@
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-import joblib
+import pickle
 
 def load_data(input_file):
     return pd.read_csv(input_file, parse_dates=['timestamp'], index_col='timestamp')
@@ -44,18 +43,18 @@ def normalize_data(train_df, test_df, val_df):
     columns = train_df.columns
 
     # Normalize the data
-    scaler = StandardScaler()
-    train_df = scaler.fit_transform(train_df)
-    test_df = scaler.transform(test_df)
-    val_df = scaler.transform(val_df)
+    train_mean = train_df.mean()
+    train_std = train_df.std()
 
-    # Convert back to DataFrame
-    train_df = pd.DataFrame(train_df, columns=columns)
-    test_df = pd.DataFrame(test_df, columns=columns)
-    val_df = pd.DataFrame(val_df, columns=columns)
+    train_df = (train_df - train_mean) / train_std
+    test_df = (test_df - train_mean) / train_std
+    val_df = (val_df - train_mean) / train_std
+
+    scaler = {'mean': train_mean, 'std': train_std}
 
     # Store the normalization
-    joblib.dump(scaler, './models/scaler.gz')
+    with open('./models/scaler.pkl', 'wb') as f:
+        pickle.dump(scaler, f)
 
     return train_df, test_df, val_df
 
