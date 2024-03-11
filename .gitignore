@@ -1,1 +1,5 @@
 .DS_Store
+test.csv
+train.csv
+val.csv
+models/
