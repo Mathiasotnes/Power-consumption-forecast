@@ -24,9 +24,8 @@ def create_dataset(dataset, lookback, target_column_index, mode='lstm'):
         return torch.tensor(X, dtype=torch.float), torch.tensor(y, dtype=torch.float).unsqueeze(1) 
     
     elif mode == 'cnn':
-        # Reshape for CNN (batch, features, seq_len)
         for i in range(len(dataset)-lookback-1):
-            feature = dataset[i:i+lookback, :].T  # Transpose to get (features, seq_len)
+            feature = dataset[i:i+lookback, :].T
             target = dataset[i+lookback, target_column_index]
             X.append(feature)
             y.append(target)
@@ -52,7 +51,7 @@ def predict_future(model, initial_sequence, steps=24, input_steps=24, mode='lstm
                 current_sequence[i+input_steps, 0] = next_value
             
     elif mode == 'cnn':
-        start_index = 17
+        start_index = 0
         with torch.no_grad():
             for i in range(steps):
                 current_input = current_sequence[start_index+i:start_index+input_steps+i, :].T.unsqueeze(0)
@@ -60,7 +59,8 @@ def predict_future(model, initial_sequence, steps=24, input_steps=24, mode='lstm
                 predictions.append(next_value.item())
 
                 # Overwrite the current_sequence with the predicted value
-                current_sequence[start_index+input_steps+i+1, 0] = next_value
+                if i < steps-1:
+                    current_sequence[start_index+input_steps+i+1, 0] = next_value
 
     return predictions
 
@@ -121,7 +121,6 @@ def train_model(model, X_train, y_train, X_test, y_test, n_epochs=15, save=False
             train_mse_accum += loss_fn(y_pred, y_batch).item() * X_batch.size(0)
             train_mae_accum += torch.abs(y_pred - y_batch).sum().item()
 
-        # Normalize the accumulated loss by the total number of samples
         train_mse = train_mse_accum / len(X_train)
         train_mae = train_mae_accum / len(X_train)
 
@@ -137,7 +136,6 @@ def train_model(model, X_train, y_train, X_test, y_test, n_epochs=15, save=False
             val_mse_accum += loss_fn(y_pred, y_test).item() * X_test.size(0)
             val_mae_accum += torch.abs(y_pred - y_test).sum().item()
 
-        # Normalize the accumulated loss by the total number of samples
         val_mse = val_mse_accum / len(X_test)
         val_mae = val_mae_accum / len(X_test)
 
@@ -189,10 +187,8 @@ def denormalize_data(data):
     return denormalized
 
 def plot_history(history, save=False, save_path=None):
-    # Create subplots for mae and mse
     fig, ax = plt.subplots(1, 2, figsize=(15, 6))
 
-    # Plot mse
     ax[0].plot(history['train']['mse'], label='train mse')
     ax[0].plot(history['val']['mse'], label='val mse')
     ax[0].set_title('MSE')
@@ -200,7 +196,6 @@ def plot_history(history, save=False, save_path=None):
     ax[0].set_ylabel('MSE')
     ax[0].legend()
 
-    # Plot mae
     ax[1].plot(history['train']['mae'], label='train mae')
     ax[1].plot(history['val']['mae'], label='val mae')
     ax[1].set_title('MAE')
@@ -216,22 +211,14 @@ def plot_history(history, save=False, save_path=None):
 def plot_error(predictions, true_values, save=False, save_path=None):
     # predictions and true_values are arrays of shape (n_samples, n_steps)
     
-    # First, ensure all arrays are of equal length (n_steps)
     n_steps = predictions[0].shape[0]
-
-    # Initialize an array to accumulate the errors for each step
     accumulated_errors = np.zeros(n_steps)
 
-    # Loop over each prediction and true value pair
     for pred, true in zip(predictions, true_values):
-        # Compute the error for this sample
         error = pred - true
-        # Square the errors for variance computation
         absolute_error = np.abs(error)
-        # Accumulate the squared errors
         accumulated_errors += absolute_error
 
-    # Divide by the number of samples to get the variance, then take the square root to get std
     std_errors = np.sqrt(accumulated_errors / len(predictions))
     
     plt.figure(figsize=(10, 6))
@@ -248,7 +235,7 @@ def plot_error(predictions, true_values, save=False, save_path=None):
 
     plt.show()
 
-def plot_errors(predictions_array, true_values, save=False, save_path=None):
+def plot_errors(predictions_array, true_values, save=False, save_path=None, labels=None):
         n_steps = predictions_array[0][0].shape[0]
         accumulated_errors_array = np.zeros((len(predictions_array), n_steps))
         for i, predictions in enumerate(predictions_array):
@@ -258,14 +245,10 @@ def plot_errors(predictions_array, true_values, save=False, save_path=None):
                 accumulated_errors_array[i, :] += absolute_error
         std_errors_array = np.sqrt(accumulated_errors_array / len(predictions_array))
         plt.figure(figsize=(10, 6))
-        plt.grid(True)
         hours = np.arange(1, 25)
         n_bars = len(std_errors_array)
         bar_width = 0.75 / n_bars
-        
-        # Offset calculation to position bars side by side
-        offsets = np.linspace(-bar_width*n_bars/3, bar_width*n_bars/3, n_bars)
-        labels = ["Transformer", "CNN", "LSTM trained on N01", "LSTM trained on N05"]
+        offsets = np.linspace(-bar_width*n_bars/2.5, bar_width*n_bars/2.5, n_bars)
         
         for i, std_errors in enumerate(std_errors_array):
             plt.bar(hours + offsets[i], std_errors, width=bar_width, label=labels[i])
@@ -277,6 +260,27 @@ def plot_errors(predictions_array, true_values, save=False, save_path=None):
         if save:
             plt.savefig(save_path)
         plt.show()
+
+def plot_histories(histories, save=False, save_path=None, labels=None):
+    fig, ax = plt.subplots(1, 2, figsize=(15, 6))
+    for i in range(len(histories)):
+        ax[0].plot(histories[i]['train']['mae'], label=f'{labels[i]}')
+        ax[0].set_title('Train MAE')
+        ax[0].set_xlabel('Epochs')
+        ax[0].set_ylabel('MAE')
+        ax[0].legend()
+
+        # Plot mae
+        ax[1].plot(histories[i]['val']['mae'], label=f'{labels[i]}')
+        ax[1].set_title('Validation MAE')
+        ax[1].set_xlabel('Epochs')
+        ax[1].set_ylabel('MAE')
+        ax[1].legend()
+
+    if save:
+        plt.savefig(save_path)
+
+    plt.show()
     
 def plot_objective(X_train, y_train, target_column_index):
     X_train = denormalize_data(X_train.numpy()[0, :, target_column_index])
@@ -308,10 +312,10 @@ class CnnModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
         # Conv1d parameters: in_channels, out_channels, kernel_size
-        self.conv1 = torch.nn.Conv1d(in_channels=8, out_channels=64, kernel_size=6, padding='same')
+        self.conv1 = torch.nn.Conv1d(in_channels=8, out_channels=64, kernel_size=24, padding='same')
         self.relu1 = torch.nn.ReLU()
         self.dropout1 = torch.nn.Dropout(p=0.2)
-        self.conv2 = torch.nn.Conv1d(in_channels=64, out_channels=32, kernel_size=6, padding='same')
+        self.conv2 = torch.nn.Conv1d(in_channels=64, out_channels=32, kernel_size=24, padding='same')
         self.relu2 = torch.nn.ReLU()
         self.pool = torch.nn.AdaptiveAvgPool1d(1)
         self.flatten = torch.nn.Flatten()
@@ -378,6 +382,10 @@ class PositionalEncoding(torch.nn.Module):
 
 if __name__ == '__main__':
 
+    ######################################################################
+    ###                  Preprocessing and Training                    ###
+    ######################################################################
+
     train_data_path = './data/train.csv'
     test_data_path = './data/test.csv'
     val_data_path = './data/val.csv'
@@ -405,22 +413,21 @@ if __name__ == '__main__':
     # LSTM mode size        => (batch, seq_len, features)
     # CNN mode size         => (batch, features, seq_len)
     # Transformer mode size => (batch, seq_len, features)
-    lookback = 24
-    X_train, y_train = create_dataset(train, lookback=lookback, target_column_index=target_column_index, mode='transformer')
-    X_test, y_test = create_dataset(test, lookback=lookback, target_column_index=target_column_index, mode='transformer')
-    X_val, y_val = create_dataset(val, lookback=lookback, target_column_index=target_column_index, mode='transformer')
-    # plot_objective(X_train, y_train, target_column_index)
 
-    # Train and save the model
+    lookback = 24
+    X_train, y_train = create_dataset(train, lookback=lookback, target_column_index=target_column_index, mode='cnn')
+    X_test, y_test = create_dataset(test, lookback=lookback, target_column_index=target_column_index, mode='cnn')
+    X_val, y_val = create_dataset(val, lookback=lookback, target_column_index=target_column_index, mode='cnn')
+    # plot_objective(X_train, y_train, target_column_index)
 
     # LSTM
     # model = LstmModel()
-    # model, history = train_model(model, X_train, y_train, X_val, y_val, n_epochs=50, save=True, save_model_path='./models/so_lstm_n05.pth', save_history_path='./models/so_lstm_n05_history.pkl')
+    # model, history = train_model(model, X_train, y_train, X_val, y_val, n_epochs=50, save=True, save_model_path='./models/lstm_n05.pth', save_history_path='./models/lstm_n05_history.pkl')
     # plot_history(history)
 
     # CNN
     # model = CnnModel()
-    # model, history = train_model(model, X_train, y_train, X_val, y_val, n_epochs=50, save=True, save_model_path='./models/so_cnn_n05.pth', save_history_path='./models/so_cnn_n05_history.pkl')
+    # model, history = train_model(model, X_train, y_train, X_val, y_val, n_epochs=50, save=True, save_model_path='./models/cnn_n05_24h.pth', save_history_path='./models/cnn_n05_24h_history.pkl')
     # plot_history(history)
 
     # Transformer
@@ -428,21 +435,27 @@ if __name__ == '__main__':
     # model, history = train_model(model, X_train, y_train, X_val, y_val, n_epochs=30, save=True, save_model_path='./models/transformer_n05.pth', save_history_path='./models/transformer_n05_history.pkl')
     # plot_history(history)
 
+
+    ######################################################################
+    ###                  Prediction and Evaluation                     ###
+    ######################################################################
+
     # Load the model
-    model = TransformerModel()
-    state_dict = torch.load('./models/transformer_n05.pth')
-    history = pickle.load(open('./models/transformer_n05_history.pkl', 'rb'))
-    model.load_state_dict(state_dict=state_dict, strict=False)
+    # model = CnnModel()
+    # state_dict = torch.load('./models/cnn_n05_24h.pth')
+    # history = pickle.load(open('./models/cnn_n05_24h_history.pkl', 'rb'))
+    # model.load_state_dict(state_dict=state_dict, strict=False)
 
     # Plot the training history
-    # plot_history(history, save=True, save_path='./figures/cnn_n05_history.png')
+    # plot_history(history, save=True, save_path='./figures/cnn_24h_n05_history.png')
 
-    # Predict the next 24 hours
+
+    # Prediction 24 hours
 
     # LSTM and Transformer
-    day_one = X_test[0]
-    day_two = X_test[24]
-    initial_sequence = torch.cat((day_one, day_two), dim=0)
+    # day_one = X_test[0]
+    # day_two = X_test[24]
+    # initial_sequence = torch.cat((day_one, day_two), dim=0)
 
     # CNN
     # day_one = X_test[0:24:lookback, :].transpose(1, 2).flatten(start_dim=0, end_dim=1)
@@ -451,42 +464,72 @@ if __name__ == '__main__':
     # day_one = day_one.numpy()
     # day_two = day_two.numpy()
 
-    # predictions = predict_future(model, initial_sequence, steps=24, input_steps=lookback, mode='transformer')
+    # predictions = predict_future(model, initial_sequence, steps=24, input_steps=lookback, mode='cnn')
     # y_test = y_test.numpy()
 
-    # plot_predictions(day_one[:, 0], predictions, day_two[:, 0], save=True, save_path='./figures/transformer_n05_pred_n05.png', denormalize=True)
+    # plot_predictions(day_one[:, 0], predictions, day_two[:, 0], save=True, save_path='./figures/cnn_24h_n05_pred_n05.png', denormalize=True)
+
+
+    # Prediction for the entire test set
     
     # Predict the entire test set
-    # predictions, labels = predict_future_full_dataset(model, X_test, lookback, target_column_index, steps=24, mode='transformer')
+    # predictions, labels = predict_future_full_dataset(model, X_test, lookback, target_column_index, steps=24, mode='cnn')
     # predictions = denormalize_data(predictions)
     # labels = denormalize_data(labels)
     # predictions = (predictions, labels)
 
+
+    ######################################################################
+    ###                          Plotting                              ###
+    ######################################################################
+
     # Save the predictions
-    # with open('./models/transformer_n05_pred_n05.pkl', 'wb') as f:
+    # with open('./models/cnn_24h_n05_pred_n05.pkl', 'wb') as f:
     #     pickle.dump(predictions, f)
 
     # Load the predictions
-    with open('./models/transformer_n05_pred_n05.pkl', 'rb') as f:
-        predictions_transformer = pickle.load(f)
+    # with open('./models/transformer_n05_pred_n05.pkl', 'rb') as f:
+    #     predictions_transformer = pickle.load(f)
 
-    with open('./models/cnn_n05_pred_n05.pkl', 'rb') as f:
-        predictions_cnn = pickle.load(f)
-
-    with open('./models/so_lstm_n01_pred_n05.pkl', 'rb') as f:
-        predictions_lstm_n01 = pickle.load(f)
-
-    with open('./models/so_lstm_n05_pred_n05.pkl', 'rb') as f:
-        predictions_lstm_n05 = pickle.load(f)
+    # with open('./models/cnn_n05_pred_n05.pkl', 'rb') as f:
+    #     predictions_cnn = pickle.load(f)
     
+    # with open('./models/cnn_24h_n05_pred_n05.pkl', 'rb') as f:
+    #     predictions_cnn_24 = pickle.load(f)
+
+    # with open('./models/lstm_n01_pred_n05.pkl', 'rb') as f:
+    #     predictions_lstm_n01 = pickle.load(f)
+
+    # with open('./models/lstm_n05_pred_n05.pkl', 'rb') as f:
+    #     predictions_lstm_n05 = pickle.load(f)
+
+    # # Load the histoies
+    # with open('./models/transformer_n05_history.pkl', 'rb') as f:
+    #     history_transformer = pickle.load(f)
+    
+    # with open('./models/cnn_n05_history.pkl', 'rb') as f:
+    #     history_cnn = pickle.load(f)
+
+    # with open('./models/cnn_n05_24h_history.pkl', 'rb') as f:
+    #     history_cnn_24 = pickle.load(f)
+    
+    # with open('./models/lstm_n01_history.pkl', 'rb') as f:
+    #     history_lstm_n01 = pickle.load(f)
+    
+    # with open('./models/lstm_n05_history.pkl', 'rb') as f:
+    #     history_lstm_n05 = pickle.load(f)
 
 
     # Plot the predictions
+    # labels = ["Transformer", "CNN [6h]", "CNN [24h]", "LSTM trained on N01", "LSTM trained on N05"]
     # plot_predictions(predictions[1][0], predictions[0][24], predictions[1][24])
     # plot_predictions(predictions[1][24], predictions[0][48], predictions[1][48])
     # plot_predictions(predictions[1][48], predictions[0][72], predictions[1][72])
     # plot_predictions(predictions[1][72], predictions[0][96], predictions[1][96])
-    # plot_error(predictions[0], predictions[1], save=True, save_path='./figures/transformer_n05_error_n05.png')
-    plot_errors([predictions_transformer[0], predictions_cnn[0], predictions_lstm_n01[0], predictions_lstm_n05[0]], predictions_transformer[1], save=True, save_path='./figures/all_models_error_n05.png')
+    # plot_error(predictions[0], predictions[1], save=True, save_path='./figures/cnn_24h_n05_error_n05.png')
+    # plot_errors([predictions_transformer[0], predictions_cnn[0], predictions_cnn_24[0], predictions_lstm_n01[0], predictions_lstm_n05[0]], predictions_transformer[1], save=True, save_path='./figures/all_models_error_2_n05.png', labels=labels)
+        
+    # Plot the training history
+    # plot_histories([history_transformer, history_cnn, history_cnn_24, history_lstm_n01, history_lstm_n05], save=True, save_path='./figures/all_models_history_n05.png', labels=labels)
 
     
