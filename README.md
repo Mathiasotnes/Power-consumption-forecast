@@ -37,3 +37,12 @@ The features to include is:
 - Observed/forecasted comsumptions (48 hour plots where 24 last is observed/forecasted)
 - An error plot showing the mean and standard deviation of the error for each hour of the forecast horizon over the test set. This plot will have forecast horizon (1-24 hours) on the x axis and absolute error on the y axis.
 - A summary bar plot that compares the different models you have trained using metrics of your choice (e.g. test set RMSE, MAE, MAPE or similar).
+
+
+### Checklist
+- Training progress visualization √
+- Forecast visualization (unscaled) √
+- Error plot over forecast horizon √
+- Multiple models X
+- Comparison of models X
+- Demonstration of model trained on seperate bidding areas compared √

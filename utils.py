@@ -79,14 +79,14 @@ class WindowGenerator():
             mean = scalar['mean'][plot_col_index]
             std = scalar['std'][plot_col_index]
             for i in range(inputs.shape[0]):
-                inputs[i, :, plot_col_index] = inputs[i, :, plot_col_index] * std + mean
-                labels[i, :, plot_col_index] = labels[i, :, plot_col_index] * std + mean
+                inputs[i, :] = inputs[i, :] * std + mean
+                labels[i, :] = labels[i, :] * std + mean
 
         max_n = min(max_subplots, len(inputs))
         for n in range(max_n):
             plt.subplot(max_n, 1, n+1)
             plt.ylabel(f'{plot_col} [normed]')
-            plt.plot(self.input_indices, inputs[n, :, plot_col_index],label='Inputs', marker='.', zorder=-10)
+            plt.plot(self.input_indices, inputs[n, :],label='Inputs', marker='.', zorder=-10)
 
             if self.label_columns:
                 label_col_index = self.label_columns_indices.get(plot_col, None)
@@ -103,7 +103,7 @@ class WindowGenerator():
 
                 if denormalize:
                     for i in range(predictions.shape[0]):
-                        predictions[i, :, plot_col_index] = predictions[i, :, plot_col_index] * std + mean
+                        predictions[i, :] = predictions[i, :] * std + mean
 
                 plt.scatter(self.label_indices, predictions[n, :, label_col_index],
                             marker='X', edgecolors='k', label='Predictions',
@@ -112,6 +112,43 @@ class WindowGenerator():
             if n == 0:
                 plt.legend()
 
+        plt.xlabel('Time [h]')
+
+    def denormalize(self, data):
+        scalar = joblib.load('./models/scaler.pkl')
+        data = np.array(data, dtype=np.float32)
+        for i in range(data.shape[0]):
+            for j in range(data.shape[2]):
+                mean = scalar['mean'][j]
+                std = scalar['std'][j]
+                data[i, :, j] = data[i, :, j] * std + mean
+            
+        return data
+    
+    def plot_error(self, model, plot_col='NO1_consumption'):
+        inputs, labels = self.example
+        model_inputs = inputs
+        inputs = inputs.numpy()
+        labels = labels.numpy()
+        predictions = model(model_inputs).numpy()
+        predictions = self.denormalize(predictions)
+        labels = self.denormalize(labels)
+
+        plot_col_index = self.column_indices[plot_col]
+        error = np.abs(predictions - labels)
+
+        plt.figure(figsize=(12, 8))
+        plt.ylabel(f'{plot_col} [normed]')
+        plt.plot(self.input_indices, inputs[0, :, plot_col_index],label='Inputs', marker='.', zorder=-10)
+        plt.scatter(self.label_indices, labels[0, :, plot_col_index],
+                    edgecolors='k', label='Labels', c='#2ca02c', s=64)
+        plt.scatter(self.label_indices, predictions[0, :, plot_col_index],
+                    marker='X', edgecolors='k', label='Predictions',
+                    c='#ff7f0e', s=64)
+        plt.scatter(self.label_indices, error[0, :, plot_col_index],
+                    marker='o', edgecolors='k', label='Error',
+                    c='#d62728', s=64)
+        plt.legend()
         plt.xlabel('Time [h]')
 
     def make_dataset(self, data):
