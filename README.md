@@ -43,6 +43,6 @@ The features to include is:
 - Training progress visualization √
 - Forecast visualization (unscaled) √
 - Error plot over forecast horizon √
-- Multiple models X
+- Multiple models √
 - Comparison of models X
 - Demonstration of model trained on seperate bidding areas compared √

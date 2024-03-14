@@ -15,7 +15,7 @@ def create_dataset(dataset, lookback, target_column_index, mode='lstm'):
     X, y = [], []
     dataset = dataset.to_numpy()
 
-    if mode == 'lstm':
+    if mode == 'lstm' or mode == 'transformer':
         for i in range(len(dataset)-lookback-1):
             feature = dataset[i:i+lookback, :]
             target = dataset[i+lookback, target_column_index]
@@ -39,11 +39,13 @@ def predict_future(model, initial_sequence, steps=24, input_steps=24, mode='lstm
     current_sequence = initial_sequence.clone().detach()
     predictions = []
 
-    if mode == 'lstm':
+    if mode == 'lstm' or mode == 'transformer':
         with torch.no_grad():
             for i in range(steps):
                 current_input = current_sequence[i:i+input_steps, :].view(1, input_steps, -1)
                 next_value = model(current_input)
+                if mode == 'transformer':
+                    next_value = torch.mean(next_value, dim=0)
                 predictions.append(next_value.item())
 
                 # Overwrite the current_sequence with the predicted value
@@ -71,7 +73,7 @@ def predict_future_full_dataset(model, dataset, lookback, target_column_index, s
     predictions = np.zeros((num_predictions, steps))
     labels = np.zeros((num_predictions, steps))
 
-    if mode == 'lstm':
+    if mode == 'lstm' or mode == 'transformer':
         with torch.no_grad():
             for i in range(num_predictions):
                 first_day = dataset[i, :, :]
@@ -263,7 +265,7 @@ def plot_errors(predictions_array, true_values, save=False, save_path=None):
         
         # Offset calculation to position bars side by side
         offsets = np.linspace(-bar_width*n_bars/3, bar_width*n_bars/3, n_bars)
-        labels = ["CNN trained on N05", "LSTM trained on N01", "LSTM trained on N05"]
+        labels = ["Transformer", "CNN", "LSTM trained on N01", "LSTM trained on N05"]
         
         for i, std_errors in enumerate(std_errors_array):
             plt.bar(hours + offsets[i], std_errors, width=bar_width, label=labels[i])
@@ -275,8 +277,21 @@ def plot_errors(predictions_array, true_values, save=False, save_path=None):
         if save:
             plt.savefig(save_path)
         plt.show()
+    
+def plot_objective(X_train, y_train, target_column_index):
+    X_train = denormalize_data(X_train.numpy()[0, :, target_column_index])
+    y_train = denormalize_data(y_train.numpy()[0, :])
+    plt.figure(figsize=(10, 6))
+    plt.plot(range(len(X_train)), X_train, 'x', label='Inputs')
+    plt.plot(range(len(X_train), len(X_train) + len(y_train)), y_train, 'o', label='Target', )
+    plt.title('Objective: Predict target value from input values')
+    plt.xlabel('Timestep')
+    plt.ylabel('Value')
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
  
-class SingleOutputLSTMModel(torch.nn.Module):
+class LstmModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.lstm = torch.nn.LSTM(input_size=8, hidden_size=50, num_layers=2, batch_first=True)
@@ -289,7 +304,7 @@ class SingleOutputLSTMModel(torch.nn.Module):
         x = self.linear(x)
         return x
     
-class SingleOutputCNNModel(torch.nn.Module):
+class CnnModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
         # Conv1d parameters: in_channels, out_channels, kernel_size
@@ -314,6 +329,51 @@ class SingleOutputCNNModel(torch.nn.Module):
         x = self.linear(x)
         return x
 
+class TransformerModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.input_embedding = torch.nn.Linear(8, 24)
+        self.pos_encoder = PositionalEncoding(24, dropout=0.2)
+        encoder_layers = torch.nn.TransformerEncoderLayer(d_model=24, nhead=8, dim_feedforward=64, dropout=0.2, batch_first=True)
+        self.transformer_encoder = torch.nn.TransformerEncoder(encoder_layers, num_layers=6)
+        self.decoder = torch.nn.Linear(24, 1)
+        self.init_weights()
+        
+    def init_weights(self):
+        initrange = 0.1
+        self.input_embedding.weight.data.uniform_(-initrange, initrange)
+        self.decoder.bias.data.zero_()
+        self.decoder.weight.data.uniform_(-initrange, initrange)
+
+    def forward(self, x):
+        x = self.input_embedding(x)  # Convert to (batch_size, seq_len, 512)
+        x = self.pos_encoder(x)
+        x = self.transformer_encoder(x)
+        x = x[:, -1, :]  # Taking the last time step
+        x = self.decoder(x)
+        return x
+
+class PositionalEncoding(torch.nn.Module):
+    def __init__(self, d_model, dropout=0.2, max_len=5000):
+        super().__init__()
+        self.dropout = torch.nn.Dropout(p=dropout)
+
+        position = torch.arange(max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) * -(np.math.log(10000.0) / d_model))
+        pe = torch.zeros(max_len, 1, d_model)
+        pe[:, 0, 0::2] = torch.sin(position * div_term)
+        pe[:, 0, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        try:
+            x = x + self.pe[:x.size(1)]
+        except:
+            try:
+                x = x + self.pe[:x.size(1), :]
+            except:
+                return self.dropout(x)
+        return self.dropout(x)
 
 
 if __name__ == '__main__':
@@ -342,26 +402,36 @@ if __name__ == '__main__':
     val = pd.read_csv(val_data_path)[features]
     target_column_index = train.columns.get_loc(target_column)
 
-    # LSTM mode size => (batch, seq_len, features)
-    # CNN mode size => (batch, features, seq_len)
-    lookback = 6
-    X_train, y_train = create_dataset(train, lookback=lookback, target_column_index=target_column_index, mode='cnn')
-    X_test, y_test = create_dataset(test, lookback=lookback, target_column_index=target_column_index, mode='cnn')
-    X_val, y_val = create_dataset(val, lookback=lookback, target_column_index=target_column_index, mode='cnn')
+    # LSTM mode size        => (batch, seq_len, features)
+    # CNN mode size         => (batch, features, seq_len)
+    # Transformer mode size => (batch, seq_len, features)
+    lookback = 24
+    X_train, y_train = create_dataset(train, lookback=lookback, target_column_index=target_column_index, mode='transformer')
+    X_test, y_test = create_dataset(test, lookback=lookback, target_column_index=target_column_index, mode='transformer')
+    X_val, y_val = create_dataset(val, lookback=lookback, target_column_index=target_column_index, mode='transformer')
+    # plot_objective(X_train, y_train, target_column_index)
 
     # Train and save the model
-    # model = SingleOutputLSTMModel()
+
+    # LSTM
+    # model = LstmModel()
     # model, history = train_model(model, X_train, y_train, X_val, y_val, n_epochs=50, save=True, save_model_path='./models/so_lstm_n05.pth', save_history_path='./models/so_lstm_n05_history.pkl')
     # plot_history(history)
 
-    # model = SingleOutputCNNModel()
+    # CNN
+    # model = CnnModel()
     # model, history = train_model(model, X_train, y_train, X_val, y_val, n_epochs=50, save=True, save_model_path='./models/so_cnn_n05.pth', save_history_path='./models/so_cnn_n05_history.pkl')
     # plot_history(history)
 
+    # Transformer
+    # model = TransformerModel()
+    # model, history = train_model(model, X_train, y_train, X_val, y_val, n_epochs=30, save=True, save_model_path='./models/transformer_n05.pth', save_history_path='./models/transformer_n05_history.pkl')
+    # plot_history(history)
+
     # Load the model
-    model = SingleOutputCNNModel()
-    state_dict = torch.load('./models/so_cnn_n05.pth')
-    history = pickle.load(open('./models/so_cnn_n05_history.pkl', 'rb'))
+    model = TransformerModel()
+    state_dict = torch.load('./models/transformer_n05.pth')
+    history = pickle.load(open('./models/transformer_n05_history.pkl', 'rb'))
     model.load_state_dict(state_dict=state_dict, strict=False)
 
     # Plot the training history
@@ -369,10 +439,10 @@ if __name__ == '__main__':
 
     # Predict the next 24 hours
 
-    # LSTM
-    # day_one = X_test[0]
-    # day_two = X_test[24]
-    # initial_sequence = torch.cat((day_one, day_two), dim=0)
+    # LSTM and Transformer
+    day_one = X_test[0]
+    day_two = X_test[24]
+    initial_sequence = torch.cat((day_one, day_two), dim=0)
 
     # CNN
     # day_one = X_test[0:24:lookback, :].transpose(1, 2).flatten(start_dim=0, end_dim=1)
@@ -381,31 +451,33 @@ if __name__ == '__main__':
     # day_one = day_one.numpy()
     # day_two = day_two.numpy()
 
-    # predictions = predict_future(model, initial_sequence, steps=24, input_steps=lookback, mode='cnn')
+    # predictions = predict_future(model, initial_sequence, steps=24, input_steps=lookback, mode='transformer')
     # y_test = y_test.numpy()
 
-    # plot_predictions(day_one[:, 0], predictions, day_two[:, 0], save=True, save_path='./figures/cnn_n05_pred_n05.png', denormalize=True)
+    # plot_predictions(day_one[:, 0], predictions, day_two[:, 0], save=True, save_path='./figures/transformer_n05_pred_n05.png', denormalize=True)
     
     # Predict the entire test set
-    # predictions, labels = predict_future_full_dataset(model, X_test, lookback, target_column_index, steps=24, mode='cnn')
+    # predictions, labels = predict_future_full_dataset(model, X_test, lookback, target_column_index, steps=24, mode='transformer')
     # predictions = denormalize_data(predictions)
     # labels = denormalize_data(labels)
     # predictions = (predictions, labels)
 
     # Save the predictions
-    # with open('./models/cnn_n05_pred_n05.pkl', 'wb') as f:
+    # with open('./models/transformer_n05_pred_n05.pkl', 'wb') as f:
     #     pickle.dump(predictions, f)
 
     # Load the predictions
-    with open('./models/cnn_n05_pred_n05.pkl', 'rb') as f:
-        predictions = pickle.load(f)
+    with open('./models/transformer_n05_pred_n05.pkl', 'rb') as f:
+        predictions_transformer = pickle.load(f)
 
-    # Compare model N01 and N05 on N05
+    with open('./models/cnn_n05_pred_n05.pkl', 'rb') as f:
+        predictions_cnn = pickle.load(f)
+
     with open('./models/so_lstm_n01_pred_n05.pkl', 'rb') as f:
-        predictions_n01 = pickle.load(f)
+        predictions_lstm_n01 = pickle.load(f)
 
     with open('./models/so_lstm_n05_pred_n05.pkl', 'rb') as f:
-        predictions_n05 = pickle.load(f)
+        predictions_lstm_n05 = pickle.load(f)
     
 
 
@@ -414,7 +486,7 @@ if __name__ == '__main__':
     # plot_predictions(predictions[1][24], predictions[0][48], predictions[1][48])
     # plot_predictions(predictions[1][48], predictions[0][72], predictions[1][72])
     # plot_predictions(predictions[1][72], predictions[0][96], predictions[1][96])
-    # plot_error(predictions[0], predictions[1], save=True, save_path='./figures/cnn_n05_error_n05.png')
-    plot_errors([predictions[0], predictions_n01[0], predictions_n05[0]], predictions[1], save=True, save_path='./figures/cnn_n05_lstm_n01_n05_error_n05.png')
+    # plot_error(predictions[0], predictions[1], save=True, save_path='./figures/transformer_n05_error_n05.png')
+    plot_errors([predictions_transformer[0], predictions_cnn[0], predictions_lstm_n01[0], predictions_lstm_n05[0]], predictions_transformer[1], save=True, save_path='./figures/all_models_error_n05.png')
 
     
